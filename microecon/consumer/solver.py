@@ -1,19 +1,18 @@
-"""消費者の効用最大化問題のソルバー.
+"""消費者の効用最大化問題・支出最小化問題のソルバー.
 
-数値解（最適消費量・効用・ラグランジュ乗数・MRS）は、コブ＝ダグラス型効用関数の
-閉形式解（Closed-form solution）を用いて決定論的に算出する。SymPyはあくまで
-途中式（ラグランジアン・一階の条件・微分過程）をMarkdown/LaTeX形式のテキストとして
-生成するためだけに用い、数値計算ロジックそのものには利用しない。
+v0.2.0では、各効用関数クラス（:class:`~microecon.consumer.base.BaseUtilityFunction`
+の具象実装）が自身のUMP（効用最大化問題）・EMP（支出最小化問題）の閉形式解を保持する
+ポリモーフィックな設計を採用する。:class:`ConsumerProblem` はそれらへの委譲
+（Delegation）のみを行い、効用関数の型に応じた `if isinstance(...)` 分岐は一切持たない。
 """
 
 from __future__ import annotations
 
-import sympy
-
 from microecon.consumer.base import BaseUtilityFunction
 from microecon.consumer.models import (
     BudgetConstraint,
-    CobbDouglasUtility,
+    ExpenditureResult,
+    HicksianDecomposition,
     OptimizationResult,
 )
 
@@ -26,113 +25,105 @@ class ConsumerProblem:
         self.budget = budget
 
     def solve(self) -> OptimizationResult:
-        """効用最大化問題を解き、最適解と解説テキストを含む結果を返す.
+        """効用最大化問題 (UMP) を解き、最適解と解説テキストを含む結果を返す.
 
-        Raises:
-            TypeError: `utility` が :class:`CobbDouglasUtility` 以外の場合。
+        実際の閉形式解の算出は `self.utility.solve_ump` へ完全に委譲する。
         """
-        if not isinstance(self.utility, CobbDouglasUtility):
-            raise TypeError(
-                "ConsumerProblem.solve() currently supports only "
-                f"CobbDouglasUtility, got {type(self.utility).__name__}"
-            )
+        return self.utility.solve_ump(self.budget)
 
-        alpha = self.utility.alpha
-        beta = self.utility.beta
-        price_x = self.budget.price_x
-        price_y = self.budget.price_y
-        income = self.budget.income
-
-        optimal_x = (alpha / (alpha + beta)) * (income / price_x)
-        optimal_y = (beta / (alpha + beta)) * (income / price_y)
-        optimal_utility = (optimal_x**alpha) * (optimal_y**beta)
-        lambda_star = ((alpha + beta) * optimal_utility) / income
-        mrs = self.utility.calculate_mrs(optimal_x, optimal_y)
-
-        markdown_steps = self._build_markdown_steps(
-            optimal_x=optimal_x,
-            optimal_y=optimal_y,
-            optimal_utility=optimal_utility,
-            lambda_star=lambda_star,
+    def solve_expenditure_minimization(
+        self, target_utility: float
+    ) -> ExpenditureResult:
+        """現在の価格 (P_x, P_y) の下で、目標効用 `target_utility` を実現する
+        支出最小化問題 (EMP) を解く。実際の閉形式解の算出は
+        `self.utility.solve_emp` へ完全に委譲する。
+        """
+        return self.utility.solve_emp(
+            target_utility, self.budget.price_x, self.budget.price_y
         )
 
-        return OptimizationResult(
-            optimal_x=optimal_x,
-            optimal_y=optimal_y,
-            optimal_utility=optimal_utility,
-            lambda_=lambda_star,
-            mrs=mrs,
+    def decompose_hicksian(self, new_price_x: float) -> HicksianDecomposition:
+        """財Xの価格が `new_price_x` へ変化した際の全効果をヒックス分解する.
+
+        変化前の効用水準 U* = V(P_x, P_y, M) を基準に、価格変化後の全効果
+        Δx^total を代替効果 Δx^sub と所得効果 Δx^inc に分解する:
+
+        - 代替効果: Δx^sub = x^h(P_x', P_y, U*) - x*(P_x, P_y, M)
+        - 所得効果: Δx^inc = x*(P_x', P_y, M) - x^h(P_x', P_y, U*)
+        - 全効果:   Δx^total = Δx^sub + Δx^inc = x*(P_x', P_y, M) - x*(P_x, P_y, M)
+        """
+        original_result = self.utility.solve_ump(self.budget)
+        base_utility = original_result.optimal_utility
+
+        new_budget = BudgetConstraint(
+            price_x=new_price_x,
+            price_y=self.budget.price_y,
+            income=self.budget.income,
+        )
+        new_result = self.utility.solve_ump(new_budget)
+
+        hicksian_at_new_price = self.utility.solve_emp(
+            base_utility, new_price_x, self.budget.price_y
+        )
+
+        substitution_effect = (
+            hicksian_at_new_price.hicksian_x - original_result.optimal_x
+        )
+        income_effect = new_result.optimal_x - hicksian_at_new_price.hicksian_x
+        total_effect = new_result.optimal_x - original_result.optimal_x
+
+        markdown_steps = self._build_hicksian_markdown(
+            base_utility=base_utility,
+            original_x=original_result.optimal_x,
+            new_x=new_result.optimal_x,
+            hicksian_x=hicksian_at_new_price.hicksian_x,
+            substitution_effect=substitution_effect,
+            income_effect=income_effect,
+            total_effect=total_effect,
+        )
+
+        return HicksianDecomposition(
+            price_x_before=self.budget.price_x,
+            price_x_after=new_price_x,
+            optimal_x_before=original_result.optimal_x,
+            optimal_x_after=new_result.optimal_x,
+            hicksian_x_at_new_price=hicksian_at_new_price.hicksian_x,
+            substitution_effect=substitution_effect,
+            income_effect=income_effect,
+            total_effect=total_effect,
             markdown_steps=markdown_steps,
         )
 
-    def _build_markdown_steps(
-        self,
+    @staticmethod
+    def _build_hicksian_markdown(
         *,
-        optimal_x: float,
-        optimal_y: float,
-        optimal_utility: float,
-        lambda_star: float,
+        base_utility: float,
+        original_x: float,
+        new_x: float,
+        hicksian_x: float,
+        substitution_effect: float,
+        income_effect: float,
+        total_effect: float,
     ) -> str:
-        """SymPyを用いて、ラグランジアンおよび一階の条件の途中式をMarkdown/LaTeX形式で生成する.
-
-        所得を表す記号には `I`（SymPyの虚数単位と衝突する）ではなく `M` を用いる。
-        """
-        x, y = sympy.symbols("x y", positive=True)
-        price_x_sym, price_y_sym, income_sym = sympy.symbols(
-            "P_x P_y M", positive=True
-        )
-        lam = sympy.symbols("lambda", positive=True)
-
-        utility_expr = sympy.sympify(self.utility.get_symbolic_expression())
-        lagrangian = utility_expr + lam * (
-            income_sym - price_x_sym * x - price_y_sym * y
-        )
-
-        dl_dx = sympy.diff(lagrangian, x)
-        dl_dy = sympy.diff(lagrangian, y)
-        dl_dlambda = sympy.diff(lagrangian, lam)
-
-        du_dx = sympy.diff(utility_expr, x)
-        du_dy = sympy.diff(utility_expr, y)
-        tangency_condition = sympy.Eq(
-            du_dx / du_dy, price_x_sym / price_y_sym
-        )
-
         sections = [
-            "## 効用最大化問題の解法過程",
+            "## ヒックス分解（代替効果と所得効果）",
             "",
-            "**効用関数:**",
-            f"$$U(x, y) = {sympy.latex(utility_expr)}$$",
+            "**基準効用:**",
+            f"$$U^{{*}} = V(P_x, P_y, M) = {round(base_utility, 4)}$$",
             "",
-            "**予算制約:**",
-            f"$$P_x x + P_y y = M$$",
+            "**代替効果 (Substitution Effect):**",
+            "$$\\Delta x^{sub} = x^{h}(P_x', P_y, U^{*}) - x^{*}(P_x, P_y, M) = "
+            f"{round(hicksian_x, 4)} - {round(original_x, 4)} "
+            f"= {round(substitution_effect, 4)}$$",
             "",
-            "**ラグランジアン:**",
-            f"$$L = U(x, y) + \\lambda (M - P_x x - P_y y) "
-            f"= {sympy.latex(lagrangian)}$$",
+            "**所得効果 (Income Effect):**",
+            "$$\\Delta x^{inc} = x^{*}(P_x', P_y, M) - x^{h}(P_x', P_y, U^{*}) = "
+            f"{round(new_x, 4)} - {round(hicksian_x, 4)} "
+            f"= {round(income_effect, 4)}$$",
             "",
-            "**一階の条件 (First-Order Conditions, FOC):**",
-            f"$$\\frac{{\\partial L}}{{\\partial x}} = {sympy.latex(dl_dx)} = 0$$",
-            f"$$\\frac{{\\partial L}}{{\\partial y}} = {sympy.latex(dl_dy)} = 0$$",
-            f"$$\\frac{{\\partial L}}{{\\partial \\lambda}} = {sympy.latex(dl_dlambda)} = 0$$",
-            "",
-            "**限界代替率と価格比の一致（接点条件）:**",
-            f"$$MRS_{{xy}} = \\frac{{\\partial U / \\partial x}}{{\\partial U / \\partial y}} "
-            f"= \\frac{{P_x}}{{P_y}}$$",
-            f"$${sympy.latex(tangency_condition)}$$",
-            "",
-            "**数値代入:**",
-            f"$$P_x = {self.budget.price_x}, \\quad P_y = {self.budget.price_y}, "
-            f"\\quad M = {self.budget.income}$$",
-            "",
-            "**閉形式解 (Closed-form solution):**",
-            "$$x^{*} = \\frac{\\alpha}{\\alpha + \\beta} \\cdot \\frac{M}{P_x} "
-            f"= {round(optimal_x, 4)}$$",
-            "$$y^{*} = \\frac{\\beta}{\\alpha + \\beta} \\cdot \\frac{M}{P_y} "
-            f"= {round(optimal_y, 4)}$$",
-            "$$U^{*} = (x^{*})^{\\alpha} (y^{*})^{\\beta} "
-            f"= {round(optimal_utility, 4)}$$",
-            "$$\\lambda^{*} = \\frac{(\\alpha + \\beta) U^{*}}{M} "
-            f"= {round(lambda_star, 4)}$$",
+            "**全効果 (Total Effect):**",
+            "$$\\Delta x^{total} = \\Delta x^{sub} + \\Delta x^{inc} = "
+            f"{round(substitution_effect, 4)} + {round(income_effect, 4)} "
+            f"= {round(total_effect, 4)}$$",
         ]
         return "\n".join(sections)

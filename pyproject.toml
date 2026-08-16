@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "microecon"
-version = "0.1.0"
+version = "0.2.0"
 description = "型安全かつ直感的にミクロ経済学の基礎理論を計算・可視化するための教育・実務向けPythonライブラリ"
 authors = ["HiHiroyoshi"]
 readme = "README.md"
