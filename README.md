@@ -2,12 +2,15 @@
 
 ミクロ経済学の基礎理論を、型安全かつ直感的に計算・可視化できる教育・実務向け Python ライブラリです。
 
-## v0.3.1 スコープ
+## v0.4.0 スコープ
 
-**消費者理論 (Consumer Theory)** と **生産者理論 (Producer Theory)** の双方を、
+**消費者理論 (Consumer Theory)**・**生産者理論 (Producer Theory)**・
+**市場均衡と厚生経済学 (Market Equilibrium & Welfare Economics)** の3領域を、
 ポリモーフィックな設計のもとで統一的に扱います。各具象クラスが主問題・双対問題双方の
-閉形式解を自ら実装し、ファサードクラス（`ConsumerProblem` / `ProducerProblem`）は
-それらへの委譲のみを行います（型ごとの `if isinstance(...)` 分岐は持ちません）。
+閉形式解（あるいは需要・供給関数）を自ら実装し、ファサードクラス
+（`ConsumerProblem` / `ProducerProblem` / `MarketEquilibrium` / `WelfareAnalyzer` /
+`TaxImpactAnalyzer`）はそれらへの委譲のみを行います（型ごとの
+`if isinstance(...)` 分岐は持ちません）。
 
 ### 消費者理論
 
@@ -41,11 +44,37 @@
 長期・短期双方の費用構造分析を提供します。Hotellingの補題・Shephardの補題（生産者版）の
 記号微分による検証にも対応します。
 
+### 市場均衡・厚生経済学（v0.4.0で追加）
+
+需要曲線・供給曲線から競争均衡を解き、税による市場の歪みを厚生（消費者余剰・
+生産者余剰・政府収入・総余剰・死荷重）の観点から定量化します。
+
+- 線形 `LinearDemandCurve` / `LinearSupplyCurve`
+- 弾力性一定型 `ConstantElasticityDemandCurve` / `ConstantElasticitySupplyCurve`
+
+`MarketEquilibrium` は需要・供給曲線の双方が閉形式解に対応する場合、両曲線の
+SymPy記号表現を連立させて代数的に均衡を解きます（`is_closed_form=True`）。
+いずれか一方でも対応しない場合のみ `scipy.optimize.root_scalar` による数値解法に
+フォールバックします。
+
+`WelfareAnalyzer` は初期化時に歪みのない競争均衡 `(P*, Q*)` を内部にキャッシュし、
+これを死荷重 (DWL) 算出の参照点として用います。消費者余剰は弾力性一定型の需要曲線で
+価格弾力性 `epsilon <= 1` の場合に理論通り発散し（`is_surplus_divergent`）、
+`float("inf")` を返します。
+
+`TaxImpactAnalyzer` は単位あたり従量税の課税による価格帰属（買い手・売り手の実効
+負担割合と、局所弾力性 `eta / (epsilon + eta)` による予測値）を分析し、厚生評価は
+内部に保持する `WelfareAnalyzer` へ委譲します（余剰計算ロジックの再実装は行いません）。
+
 ### 共通の設計方針
 
-- 数値解は全て閉形式解によって決定論的に算出されます。
-- `sympy` は途中式の解説（Markdown/LaTeX）の生成や、各種補題の記号微分による理論検証
-  にのみ使用され、数値計算そのものには利用されません。
+- 消費者理論・生産者理論の数値解は全て閉形式解によって決定論的に算出されます。
+  市場均衡・厚生経済学モジュールは、両曲線が閉形式解に対応する場合はSymPyによる
+  代数解法を、対応しない場合は`scipy.optimize`による数値解法を用いる二重構成を
+  採ります。余剰・死荷重の積分評価には `scipy.integrate` を用います。
+- `sympy` は途中式の解説（Markdown/LaTeX）の生成、各種補題の記号微分による理論検証、
+  および市場均衡の代数解法にのみ使用され、消費者理論・生産者理論の数値計算そのもの
+  には利用されません。
 - `matplotlib` によって消費者理論の予算制約線・無差別曲線・最適点をグラフとして
   出力できます。
 
@@ -102,6 +131,23 @@ short_run = ShortRunProduction(production, fixed_capital=4.0, wage=2.0, rental=3
 print(short_run.fixed_cost(), short_run.variable_cost(8.0))
 ```
 
+### 市場均衡・厚生経済学
+
+```python
+from microecon.market import LinearDemandCurve, LinearSupplyCurve, TaxImpactAnalyzer
+
+demand = LinearDemandCurve(a=100.0, b=2.0)
+supply = LinearSupplyCurve(c=-20.0, d=2.0)
+
+analyzer = TaxImpactAnalyzer(demand, supply)
+
+# 単位あたり従量税 t = 8 を課した場合の価格帰属・厚生への影響
+result = analyzer.analyze_specific_tax(tax=8.0)
+print(result.buyer_price, result.seller_price, result.taxed_quantity)
+print(result.buyer_tax_share, result.elasticity_predicted_buyer_share)
+print(result.welfare.deadweight_loss)
+```
+
 ## 開発
 
 ```bash
@@ -116,12 +162,14 @@ poetry run pytest
 A type-safe, intuitive Python library for computing and visualizing the
 foundational theory of microeconomics, aimed at both education and practical use.
 
-### v0.3.1 Scope
+### v0.4.0 Scope
 
-Both **Consumer Theory** and **Producer Theory** are supported under a unified,
-polymorphic design. Each concrete class implements the closed-form solutions for
-both its primal and dual problems, while the facade classes (`ConsumerProblem` /
-`ProducerProblem`) do nothing but delegate to them — no `if isinstance(...)`
+**Consumer Theory**, **Producer Theory**, and **Market Equilibrium & Welfare
+Economics** are all supported under a unified, polymorphic design. Each
+concrete class implements the closed-form solutions (or demand/supply
+functions) for its own problem, while the facade classes (`ConsumerProblem` /
+`ProducerProblem` / `MarketEquilibrium` / `WelfareAnalyzer` /
+`TaxImpactAnalyzer`) do nothing but delegate to them — no `if isinstance(...)`
 branching by type ever appears in the solvers.
 
 #### Consumer Theory
@@ -162,13 +210,47 @@ fixed and variable cost with capital held fixed, covering both long-run and
 short-run cost structure analysis. Symbolic verification of Hotelling's lemma
 and the producer-side Shephard's lemma are also supported.
 
+#### Market Equilibrium & Welfare Economics (new in v0.4.0)
+
+Solves the competitive equilibrium from a demand curve and a supply curve, and
+quantifies how a tax distorts the market in terms of welfare (consumer
+surplus, producer surplus, government revenue, total surplus, and deadweight
+loss).
+
+- Linear: `LinearDemandCurve` / `LinearSupplyCurve`
+- Constant elasticity: `ConstantElasticityDemandCurve` /
+  `ConstantElasticitySupplyCurve`
+
+When both the demand and supply curves support a closed-form solution,
+`MarketEquilibrium` solves for the equilibrium algebraically by equating their
+SymPy symbolic expressions (`is_closed_form=True`). Only when either curve
+lacks a closed form does it fall back to a numeric solution via
+`scipy.optimize.root_scalar`.
+
+`WelfareAnalyzer` caches the undistorted competitive equilibrium `(P*, Q*)` at
+construction time and uses it as the reference point for the deadweight loss
+(DWL) calculation. Consumer surplus correctly diverges to `float("inf")` for a
+constant-elasticity demand curve whose price elasticity satisfies
+`epsilon <= 1` (`is_surplus_divergent`), matching economic theory.
+
+`TaxImpactAnalyzer` analyzes the incidence of a per-unit specific tax (the
+buyer's and seller's effective tax shares, along with the value predicted by
+the local elasticity formula `eta / (epsilon + eta)`), and delegates its
+welfare evaluation to the `WelfareAnalyzer` it holds internally (it never
+re-implements the surplus calculation logic).
+
 #### Shared design principles
 
-- All numerical results are computed deterministically via closed-form
-  solutions.
-- `sympy` is used only to generate the Markdown/LaTeX explanation of the
-  derivation and to verify the various lemmas via symbolic differentiation —
-  it is never part of the numerical computation path.
+- All numerical results for consumer theory and producer theory are computed
+  deterministically via closed-form solutions. The market equilibrium and
+  welfare economics module uses a dual approach: an algebraic solution via
+  SymPy when both curves support a closed form, and a numeric solution via
+  `scipy.optimize` otherwise. Surplus and deadweight-loss integrals are
+  evaluated with `scipy.integrate`.
+- `sympy` is used to generate the Markdown/LaTeX explanation of the
+  derivation, to verify the various lemmas via symbolic differentiation, and
+  to solve market equilibria algebraically — it is never part of the
+  numerical computation path for consumer theory or producer theory.
 - `matplotlib` renders the budget line, indifference curve, and optimal point
   for consumer theory as an image file.
 
@@ -224,6 +306,23 @@ print(analyzer.marginal_cost(12.0), analyzer.average_cost(12.0))
 # Short-run cost decomposition (capital fixed at 4)
 short_run = ShortRunProduction(production, fixed_capital=4.0, wage=2.0, rental=3.0)
 print(short_run.fixed_cost(), short_run.variable_cost(8.0))
+```
+
+#### Market Equilibrium & Welfare Economics
+
+```python
+from microecon.market import LinearDemandCurve, LinearSupplyCurve, TaxImpactAnalyzer
+
+demand = LinearDemandCurve(a=100.0, b=2.0)
+supply = LinearSupplyCurve(c=-20.0, d=2.0)
+
+analyzer = TaxImpactAnalyzer(demand, supply)
+
+# Impact on price incidence and welfare of a per-unit specific tax t = 8
+result = analyzer.analyze_specific_tax(tax=8.0)
+print(result.buyer_price, result.seller_price, result.taxed_quantity)
+print(result.buyer_tax_share, result.elasticity_predicted_buyer_share)
+print(result.welfare.deadweight_loss)
 ```
 
 ### Development
