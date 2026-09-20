@@ -2,6 +2,34 @@
 
 ミクロ経済学の基礎理論を、型安全かつ直感的に計算・可視化できる教育・実務向け Python ライブラリです。
 
+## v0.5.0 スコープ
+
+**不確実性下の意思決定・リスク選好・動的（異時点間）選好分析 (Uncertainty, Risk
+Preference & Dynamic Preference Analysis)** を追加しました。期待効用理論に基づく
+リスク指標の算出と、割引関数による異時点間の消費選択評価を、v0.4.0までと同様の
+ポリモーフィックな設計のもとで提供します。
+
+### 不確実性・リスク選好・動的選好（v0.5.0で追加）
+
+ベルヌーイ効用関数 `BaseBernoulliUtility` と割引関数 `BaseDiscountFunction` は
+共通の抽象基底クラス `BaseEconomicFunction`（`evaluate` / `get_expression` /
+`has_closed_form` の命名規約）に準拠します。
+
+- CRRA型（相対的リスク回避度一定） `CRRAUtility`（リスク中立ケース gamma=0 も許容）
+- CARA型（絶対的リスク回避度一定） `CARAUtility`
+- 指数割引 `ExponentialDiscounting`（時間整合的）
+- 準双曲割引（beta-delta割引） `QuasiHyperbolicDiscounting`（beta<1で時間非整合）
+
+`ExpectedUtilityAnalyzer` はくじ `Lottery`（状態別所得とその生起確率の組）を
+効用関数で評価し、期待所得・期待効用・確実性等価（CE）・リスク・プレミアム（RP）・
+絶対的/相対的リスク回避度（ARA/RRA、期待所得における評価値）を
+`RiskAnalysisResult` として返します。確実性等価は効用の逆関数による解析解を
+優先し、対応しない場合のみ `scipy.optimize.root_scalar` にフォールバックします。
+
+`IntertemporalChoice` は割引関数と期間内効用関数を組み合わせ、消費ストリーム
+`(c_0, c_1, ..., c_T)` の割引現在価値 `sum_t D(t) u(c_t)` と時間整合性を
+`DiscountedUtilityResult` として返します。
+
 ## v0.4.0 スコープ
 
 **消費者理論 (Consumer Theory)**・**生産者理論 (Producer Theory)**・
@@ -148,6 +176,30 @@ print(result.buyer_tax_share, result.elasticity_predicted_buyer_share)
 print(result.welfare.deadweight_loss)
 ```
 
+### 不確実性・リスク選好・動的選好
+
+```python
+from microecon.uncertainty import (
+    CRRAUtility,
+    ExpectedUtilityAnalyzer,
+    IntertemporalChoice,
+    Lottery,
+    QuasiHyperbolicDiscounting,
+)
+
+# 期待効用理論に基づくリスク・プレミアムの評価
+utility = CRRAUtility(gamma=1.0)  # 対数効用
+lottery = Lottery(outcomes=((0.5, 100.0), (0.5, 400.0)))
+result = ExpectedUtilityAnalyzer(utility).analyze(lottery)
+print(result.certainty_equivalent, result.risk_premium)
+
+# beta-delta 準双曲割引による異時点間消費計画の評価
+discounting = QuasiHyperbolicDiscounting(beta=0.8, delta=0.95)
+choice = IntertemporalChoice(discounting, CRRAUtility(gamma=0.0))
+stream_result = choice.evaluate_stream((100.0, 100.0, 100.0))
+print(stream_result.present_value, stream_result.is_time_consistent)
+```
+
 ## 開発
 
 ```bash
@@ -161,6 +213,39 @@ poetry run pytest
 
 A type-safe, intuitive Python library for computing and visualizing the
 foundational theory of microeconomics, aimed at both education and practical use.
+
+### v0.5.0 Scope
+
+Adds **Uncertainty, Risk Preference & Dynamic Preference Analysis**: risk
+metrics grounded in expected-utility theory, and intertemporal consumption
+evaluation via discount functions, following the same polymorphic design as
+the modules through v0.4.0.
+
+#### Uncertainty, Risk & Dynamic Preference (new in v0.5.0)
+
+`BaseBernoulliUtility` and `BaseDiscountFunction` both conform to the shared
+abstract base `BaseEconomicFunction` (the `evaluate` / `get_expression` /
+`has_closed_form` naming convention).
+
+- CRRA (constant relative risk aversion): `CRRAUtility` (also covers the
+  risk-neutral case, gamma=0)
+- CARA (constant absolute risk aversion): `CARAUtility`
+- Exponential discounting: `ExponentialDiscounting` (time-consistent)
+- Quasi-hyperbolic (beta-delta) discounting: `QuasiHyperbolicDiscounting`
+  (time-inconsistent when beta < 1)
+
+`ExpectedUtilityAnalyzer` evaluates a `Lottery` (state-contingent payoffs and
+their probabilities) under a given utility function, returning expected
+wealth, expected utility, the certainty equivalent (CE), the risk premium
+(RP), and absolute/relative risk aversion (ARA/RRA, evaluated at expected
+wealth) as a `RiskAnalysisResult`. The certainty equivalent prefers the
+closed-form inverse utility function and falls back to
+`scipy.optimize.root_scalar` only when one isn't available.
+
+`IntertemporalChoice` combines a discount function with a period utility
+function to evaluate a consumption stream `(c_0, c_1, ..., c_T)`, returning
+its discounted present value `sum_t D(t) u(c_t)` and time consistency as a
+`DiscountedUtilityResult`.
 
 ### v0.4.0 Scope
 
@@ -323,6 +408,30 @@ result = analyzer.analyze_specific_tax(tax=8.0)
 print(result.buyer_price, result.seller_price, result.taxed_quantity)
 print(result.buyer_tax_share, result.elasticity_predicted_buyer_share)
 print(result.welfare.deadweight_loss)
+```
+
+#### Uncertainty, Risk & Dynamic Preference
+
+```python
+from microecon.uncertainty import (
+    CRRAUtility,
+    ExpectedUtilityAnalyzer,
+    IntertemporalChoice,
+    Lottery,
+    QuasiHyperbolicDiscounting,
+)
+
+# Risk premium under expected-utility theory
+utility = CRRAUtility(gamma=1.0)  # logarithmic utility
+lottery = Lottery(outcomes=((0.5, 100.0), (0.5, 400.0)))
+result = ExpectedUtilityAnalyzer(utility).analyze(lottery)
+print(result.certainty_equivalent, result.risk_premium)
+
+# Intertemporal consumption plan under beta-delta quasi-hyperbolic discounting
+discounting = QuasiHyperbolicDiscounting(beta=0.8, delta=0.95)
+choice = IntertemporalChoice(discounting, CRRAUtility(gamma=0.0))
+stream_result = choice.evaluate_stream((100.0, 100.0, 100.0))
+print(stream_result.present_value, stream_result.is_time_consistent)
 ```
 
 ### Development
