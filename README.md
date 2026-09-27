@@ -2,6 +2,31 @@
 
 ミクロ経済学の基礎理論を、型安全かつ直感的に計算・可視化できる教育・実務向け Python ライブラリです。
 
+## v0.6.0 スコープ
+
+**戦略型ゲーム・ナッシュ均衡分析 (Strategic-Form Games & Nash Equilibrium)** を
+追加しました。2人有限戦略型ゲームにおける支配戦略の判定、純粋・混合戦略ナッシュ均衡の
+算出を、v0.5.0までと同様の不変（immutable）データクラスによる結果表現のもとで提供します。
+
+### 戦略型ゲーム・ナッシュ均衡（v0.6.0で追加）
+
+`NormalFormGame` は利得行列のペア `(A, B)` によって2人有限戦略型ゲームを表現し、
+任意の相手戦略に対して厳密に（あるいは弱く）優る厳密支配戦略・弱支配戦略の判定
+（許容誤差 `atol=1e-6`）、ゼロサムゲーム判定（`A + B = 0`）を提供します。
+
+`NashSolver` は以下の2種類のアルゴリズムでナッシュ均衡を算出します。
+
+- 純粋戦略ナッシュ均衡: 最適反応（Best Response）比較により、任意の `m x n`
+  サイズのゲームに対応（`find_pure_nash`）
+- 混合戦略ナッシュ均衡: v0.6.0時点では `2 x 2` ゲームの無差別条件による解析解のみ
+  対応（`find_mixed_nash`）。対応しないサイズでは `NotImplementedError` を送出し
+  （N x M ゲームへの一般化はv0.7.0でLemke-Howsonアルゴリズムにより対応予定）、
+  `solve()` はこれを内部で捕捉して `mixed_nash_equilibria = ()` にフォールバック
+  します。
+
+結果を保持する `MixedStrategyProfile` の確率分布ベクトル（NumPy配列）は、複製の上で
+`writeable = False` 化されており、誤った書き換えを防ぎます。
+
 ## v0.5.0 スコープ
 
 **不確実性下の意思決定・リスク選好・動的（異時点間）選好分析 (Uncertainty, Risk
@@ -200,6 +225,37 @@ stream_result = choice.evaluate_stream((100.0, 100.0, 100.0))
 print(stream_result.present_value, stream_result.is_time_consistent)
 ```
 
+### 戦略型ゲーム・ナッシュ均衡
+
+```python
+import numpy as np
+
+from microecon.game_theory import NashSolver, NormalFormGame
+
+# 囚人のジレンマ
+payoff_a = np.array([[-1.0, -3.0], [0.0, -2.0]])
+payoff_b = np.array([[-1.0, 0.0], [-3.0, -2.0]])
+game = NormalFormGame(payoff_matrices=(payoff_a, payoff_b))
+
+print(game.has_dominant_strategy(0, strict=True))  # True（裏切りが支配戦略）
+print(game.get_dominant_strategy(0, strict=True))  # 1
+
+result = NashSolver(game).solve()
+print(result.pure_nash_equilibria[0].strategy_indices)  # (1, 1)
+print(result.pure_nash_equilibria[0].payoffs)  # (-2.0, -2.0)
+
+# コインの表裏合わせ（ゼロサム・混合戦略ナッシュ均衡）
+matching_pennies = NormalFormGame(
+    payoff_matrices=(
+        np.array([[1.0, -1.0], [-1.0, 1.0]]),
+        np.array([[-1.0, 1.0], [1.0, -1.0]]),
+    )
+)
+mixed_result = NashSolver(matching_pennies).solve()
+print(mixed_result.is_zero_sum)  # True
+print(mixed_result.mixed_nash_equilibria[0].probabilities)  # (array([0.5, 0.5]), array([0.5, 0.5]))
+```
+
 ## 開発
 
 ```bash
@@ -213,6 +269,33 @@ poetry run pytest
 
 A type-safe, intuitive Python library for computing and visualizing the
 foundational theory of microeconomics, aimed at both education and practical use.
+
+### v0.6.0 Scope
+
+Adds **Strategic-Form Games & Nash Equilibrium**: dominant-strategy detection
+and pure/mixed Nash equilibrium computation for two-player finite normal-form
+games, with results represented via the same immutable dataclass style used
+through v0.5.0.
+
+#### Strategic-Form Games & Nash Equilibrium (new in v0.6.0)
+
+`NormalFormGame` represents a two-player finite normal-form game via a pair of
+payoff matrices `(A, B)`, and detects strict and weak dominant strategies
+(tolerance `atol=1e-6`) as well as zero-sum games (`A + B = 0`).
+
+`NashSolver` computes Nash equilibria via two algorithms:
+
+- Pure-strategy Nash equilibria: enumerated via best-response comparison,
+  supporting any `m x n` game size (`find_pure_nash`)
+- Mixed-strategy Nash equilibria: as of v0.6.0, only `2 x 2` games are
+  supported, via the closed-form indifference-condition solution
+  (`find_mixed_nash`). Other sizes raise `NotImplementedError` (general `N x M`
+  support is planned for v0.7.0 via the Lemke-Howson algorithm), which
+  `solve()` catches internally and falls back to
+  `mixed_nash_equilibria = ()`.
+
+The probability vectors (NumPy arrays) held by `MixedStrategyProfile` are
+copied and marked `writeable = False`, preventing accidental mutation.
 
 ### v0.5.0 Scope
 
@@ -432,6 +515,37 @@ discounting = QuasiHyperbolicDiscounting(beta=0.8, delta=0.95)
 choice = IntertemporalChoice(discounting, CRRAUtility(gamma=0.0))
 stream_result = choice.evaluate_stream((100.0, 100.0, 100.0))
 print(stream_result.present_value, stream_result.is_time_consistent)
+```
+
+#### Strategic-Form Games & Nash Equilibrium
+
+```python
+import numpy as np
+
+from microecon.game_theory import NashSolver, NormalFormGame
+
+# Prisoner's Dilemma
+payoff_a = np.array([[-1.0, -3.0], [0.0, -2.0]])
+payoff_b = np.array([[-1.0, 0.0], [-3.0, -2.0]])
+game = NormalFormGame(payoff_matrices=(payoff_a, payoff_b))
+
+print(game.has_dominant_strategy(0, strict=True))  # True (Defect dominates)
+print(game.get_dominant_strategy(0, strict=True))  # 1
+
+result = NashSolver(game).solve()
+print(result.pure_nash_equilibria[0].strategy_indices)  # (1, 1)
+print(result.pure_nash_equilibria[0].payoffs)  # (-2.0, -2.0)
+
+# Matching Pennies (zero-sum, mixed-strategy Nash equilibrium)
+matching_pennies = NormalFormGame(
+    payoff_matrices=(
+        np.array([[1.0, -1.0], [-1.0, 1.0]]),
+        np.array([[-1.0, 1.0], [1.0, -1.0]]),
+    )
+)
+mixed_result = NashSolver(matching_pennies).solve()
+print(mixed_result.is_zero_sum)  # True
+print(mixed_result.mixed_nash_equilibria[0].probabilities)  # (array([0.5, 0.5]), array([0.5, 0.5]))
 ```
 
 ### Development
