@@ -2,6 +2,47 @@
 
 ミクロ経済学の基礎理論を、型安全かつ直感的に計算・可視化できる教育・実務向け Python ライブラリです。
 
+## v0.7.0 スコープ
+
+**一般形ゲーム解法・動的ゲーム・連続戦略ゲーム** を追加しました。外部のゲーム理論
+ライブラリには依存せず、Pure Python + NumPy / SciPy / SymPy のみで実装しています。
+
+### Lemke-Howson アルゴリズム（v0.7.0で追加）
+
+`LemkeHowsonSolver` は任意サイズ `M x N` の双行列ゲームについて、線形相補性問題の
+Tableau ピボット操作により1つのナッシュ均衡 `(p*, q*)` を求めます。
+
+- 退化ゲームでの無限巡回を防ぐため、辞書式最小比テストで行選択を一意化
+- 正値化定数 `k` は内部計算のみに使用し、期待利得は元の利得行列で `p^T A q`, `p^T B q` を評価
+- 初期ラベルが `0 <= label < M + N` の範囲外なら `ValueError`、得られた解が最適反応条件
+  （支持集合 `> 1e-6`、許容誤差 `1e-4`）を満たさなければ `RuntimeError`
+
+`NashSolver.find_mixed_nash` は `2 x 2` ゲームでは解析解で完全混合戦略
+（`0 < p, q < 1`）を、それ以外のサイズでは全初期ラベルの Lemke-Howson 探索を用い、
+純粋戦略を除外・重複排除（許容誤差 `1e-4`）した混合戦略均衡を返します
+（v0.6.0 の `NotImplementedError` は廃止）。純粋戦略均衡は `pure_nash_equilibria` にのみ
+格納されます。
+
+> **注意**: Lemke-Howson アルゴリズムが保証するのは「少なくとも1つのナッシュ均衡」の
+> 発見であり、全ナッシュ均衡の完全列挙は保証しません（例: 男女の争いの完全混合均衡には
+> どの初期ラベルからも到達しません）。均衡が連続体（線分等）となる退化ゲームでは、
+> 到達した連続体の代表点（頂点解）のみを返却します。
+
+### 連続戦略ゲーム（v0.7.0で追加）
+
+`ContinuousGame` は SymPy 記号式の利得関数を持つ2人連続戦略ゲームを表現します。
+`get_best_response_expression` は FOC を解き SOC を満たす最適反応関数を返し、
+`find_pure_nash` は内点 FOC 解と有限な境界（無限大は除外）の全組み合わせを候補として
+相互最適反応を検証し、角点解（`is_corner=True`）を含む全均衡を返します。
+
+### 展開型ゲーム・後方帰納法（v0.7.0で追加）
+
+`ExtensiveFormGame` は完備情報の動的ゲーム（ゲーム木）を表現し、構築時に厳格な木構造
+バリデーション（ルートの存在、親が厳密に1つ、全ノードへの到達可能性、プレイヤー
+インデックス・利得長・行動と子ノードの一致）を行います。`solve_spne` は後方帰納法により
+部分ゲーム完全ナッシュ均衡を求め、`tie_breaking_rule="first"` では無差別な行動のうち
+`actions` の先頭を選択します。結果は `MappingProxyType` により読み取り専用です。
+
 ## v0.6.0 スコープ
 
 **戦略型ゲーム・ナッシュ均衡分析 (Strategic-Form Games & Nash Equilibrium)** を
@@ -256,6 +297,47 @@ print(mixed_result.is_zero_sum)  # True
 print(mixed_result.mixed_nash_equilibria[0].probabilities)  # (array([0.5, 0.5]), array([0.5, 0.5]))
 ```
 
+### 一般形ゲーム・連続戦略ゲーム・展開型ゲーム
+
+```python
+import numpy as np
+import sympy as sp
+
+from microecon.game_theory import (
+    ContinuousGame,
+    ExtensiveFormGame,
+    ExtensiveFormNode,
+    LemkeHowsonSolver,
+)
+
+# Lemke-Howson（コインの表裏合わせ）
+matrix_a = np.array([[1.0, -1.0], [-1.0, 1.0]])
+solver = LemkeHowsonSolver(matrix_a, -matrix_a)
+p, q = solver.solve(initial_dropped_label=0)
+print(p, q, solver.expected_payoffs(p, q))  # [0.5 0.5] [0.5 0.5] ≈(0.0, 0.0)
+
+# Cournot 複占（角点解）
+q1, q2 = sp.symbols("q1 q2")
+price = 100 - (q1 + q2)
+cournot = ContinuousGame(
+    ((price - 10) * q1, (price - 120) * q2), (q1, q2), ((0.0, float("inf")),) * 2
+)
+print(cournot.find_pure_nash())  # strategies=(45.0, 0.0), is_corner=True
+
+# 市場参入ゲーム（後方帰納法）
+nodes = {
+    "root": ExtensiveFormNode("root", 0, ("Enter", "Out"), {"Enter": "n_enter", "Out": "n_out"}),
+    "n_out": ExtensiveFormNode("n_out", None, (), payoffs=(0.0, 300.0)),
+    "n_enter": ExtensiveFormNode(
+        "n_enter", 1, ("Fight", "Acquiesce"), {"Fight": "n_fight", "Acquiesce": "n_acq"}
+    ),
+    "n_fight": ExtensiveFormNode("n_fight", None, (), payoffs=(-100.0, 0.0)),
+    "n_acq": ExtensiveFormNode("n_acq", None, (), payoffs=(100.0, 100.0)),
+}
+spne = ExtensiveFormGame("root", nodes).solve_spne()
+print(dict(spne.equilibrium_strategies[1]), spne.payoffs)  # {'n_enter': 'Acquiesce'} (100.0, 100.0)
+```
+
 ## 開発
 
 ```bash
@@ -269,6 +351,53 @@ poetry run pytest
 
 A type-safe, intuitive Python library for computing and visualizing the
 foundational theory of microeconomics, aimed at both education and practical use.
+
+### v0.7.0 Scope
+
+Adds **general normal-form game solving, dynamic games, and continuous-strategy
+games**, implemented with pure Python + NumPy / SciPy / SymPy only (no external
+game-theory libraries).
+
+#### Lemke-Howson Algorithm (new in v0.7.0)
+
+`LemkeHowsonSolver` finds one Nash equilibrium `(p*, q*)` of any `M x N`
+bimatrix game via complementary pivoting on LCP tableaux.
+
+- A lexicographic minimum ratio test makes row selection unique, preventing
+  cycling in degenerate games
+- The positivity shift `k` is internal only; expected payoffs are evaluated on
+  the original matrices as `p^T A q`, `p^T B q`
+- Raises `ValueError` for an initial label outside `0 <= label < M + N`, and
+  `RuntimeError` if the result fails the best-response check (support
+  `> 1e-6`, tolerance `1e-4`)
+
+`NashSolver.find_mixed_nash` uses the closed-form solution for fully mixed
+equilibria (`0 < p, q < 1`) in `2 x 2` games, and Lemke-Howson from every
+initial label otherwise, returning only non-pure, de-duplicated (tolerance
+`1e-4`) profiles (the v0.6.0 `NotImplementedError` is removed). Pure equilibria
+appear only in `pure_nash_equilibria`.
+
+> **Note**: Lemke-Howson guarantees finding *at least one* Nash equilibrium, not
+> all of them (e.g. no initial label reaches the fully mixed equilibrium of the
+> Battle of the Sexes). For degenerate games with a continuum of equilibria,
+> only the representative vertex reached is returned.
+
+#### Continuous-Strategy Games (new in v0.7.0)
+
+`ContinuousGame` models two-player games with SymPy payoff expressions.
+`get_best_response_expression` solves the FOC and keeps the SOC-satisfying
+solution; `find_pure_nash` enumerates interior FOC solutions and finite bounds
+(infinite bounds are excluded), verifies mutual best responses, and returns all
+equilibria, including corner solutions (`is_corner=True`).
+
+#### Extensive-Form Games & Backward Induction (new in v0.7.0)
+
+`ExtensiveFormGame` models perfect-information dynamic games (game trees) with
+strict tree validation at construction (root exists, exactly one parent per
+non-root node, all nodes reachable, valid player indices, payoff lengths, and
+actions matching children). `solve_spne` derives the subgame-perfect Nash
+equilibrium by backward induction; `tie_breaking_rule="first"` picks the
+earliest action among ties. Results are read-only via `MappingProxyType`.
 
 ### v0.6.0 Scope
 
@@ -546,6 +675,47 @@ matching_pennies = NormalFormGame(
 mixed_result = NashSolver(matching_pennies).solve()
 print(mixed_result.is_zero_sum)  # True
 print(mixed_result.mixed_nash_equilibria[0].probabilities)  # (array([0.5, 0.5]), array([0.5, 0.5]))
+```
+
+#### General Games, Continuous-Strategy Games & Extensive-Form Games
+
+```python
+import numpy as np
+import sympy as sp
+
+from microecon.game_theory import (
+    ContinuousGame,
+    ExtensiveFormGame,
+    ExtensiveFormNode,
+    LemkeHowsonSolver,
+)
+
+# Lemke-Howson (Matching Pennies)
+matrix_a = np.array([[1.0, -1.0], [-1.0, 1.0]])
+solver = LemkeHowsonSolver(matrix_a, -matrix_a)
+p, q = solver.solve(initial_dropped_label=0)
+print(p, q, solver.expected_payoffs(p, q))  # [0.5 0.5] [0.5 0.5] ≈(0.0, 0.0)
+
+# Cournot duopoly (corner solution)
+q1, q2 = sp.symbols("q1 q2")
+price = 100 - (q1 + q2)
+cournot = ContinuousGame(
+    ((price - 10) * q1, (price - 120) * q2), (q1, q2), ((0.0, float("inf")),) * 2
+)
+print(cournot.find_pure_nash())  # strategies=(45.0, 0.0), is_corner=True
+
+# Market entry game (backward induction)
+nodes = {
+    "root": ExtensiveFormNode("root", 0, ("Enter", "Out"), {"Enter": "n_enter", "Out": "n_out"}),
+    "n_out": ExtensiveFormNode("n_out", None, (), payoffs=(0.0, 300.0)),
+    "n_enter": ExtensiveFormNode(
+        "n_enter", 1, ("Fight", "Acquiesce"), {"Fight": "n_fight", "Acquiesce": "n_acq"}
+    ),
+    "n_fight": ExtensiveFormNode("n_fight", None, (), payoffs=(-100.0, 0.0)),
+    "n_acq": ExtensiveFormNode("n_acq", None, (), payoffs=(100.0, 100.0)),
+}
+spne = ExtensiveFormGame("root", nodes).solve_spne()
+print(dict(spne.equilibrium_strategies[1]), spne.payoffs)  # {'n_enter': 'Acquiesce'} (100.0, 100.0)
 ```
 
 ### Development
