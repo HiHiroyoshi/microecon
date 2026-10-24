@@ -135,26 +135,26 @@ class TestBattleOfTheSexes:
 
 
 # --------------------------------------------------------------------------
-# 5. 3x3調整ゲーム（v0.6.0スコープ境界のフォールバック検証）
+# 5. 3x3調整ゲーム（v0.7.0: Lemke-Howson による M x N 混合戦略探索）
 # --------------------------------------------------------------------------
 
 
-class TestThreeByThreeCoordinationGameFallback:
-    """対角成分に利得を持つ3x3調整ゲームにおいて、find_mixed_nash() は
-    NotImplementedError を送出する一方、solve() は正常終了し
-    mixed_nash_equilibria が空タプルとなることの検証."""
+class TestThreeByThreeCoordinationGame:
+    """対角成分に利得を持つ3x3調整ゲームにおいて、v0.7.0 以降の
+    find_mixed_nash() は NotImplementedError を送出せず Lemke-Howson で探索し、
+    全初期ラベルが純粋戦略均衡に到達するため mixed_nash_equilibria が
+    空タプルとなることの検証（純粋戦略均衡は pure_nash_equilibria にのみ集約）."""
 
     @pytest.fixture
     def game(self) -> NormalFormGame:
         matrix = np.diag([3.0, 2.0, 1.0])
         return NormalFormGame(payoff_matrices=(matrix, matrix))
 
-    def test_find_mixed_nash_raises_not_implemented(self, game: NormalFormGame) -> None:
+    def test_find_mixed_nash_excludes_pure_profiles(self, game: NormalFormGame) -> None:
         solver = NashSolver(game)
-        with pytest.raises(NotImplementedError):
-            solver.find_mixed_nash()
+        assert solver.find_mixed_nash() == ()
 
-    def test_solve_does_not_raise_and_falls_back(self, game: NormalFormGame) -> None:
+    def test_solve_mixed_nash_is_empty(self, game: NormalFormGame) -> None:
         solver = NashSolver(game)
         res = solver.solve()
         assert res.mixed_nash_equilibria == ()
