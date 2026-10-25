@@ -2,6 +2,31 @@
 
 ミクロ経済学の基礎理論を、型安全かつ直感的に計算・可視化できる教育・実務向け Python ライブラリです。
 
+## v0.8.0 スコープ
+
+**一般均衡理論（純粋交換経済・Edgeworth Box・Arrow-Debreu競争均衡）** を
+`microecon.general_equilibrium` として追加しました。外部ライブラリには依存せず、
+Pure Python + NumPy / SciPy + SymPy のみで実装しています。
+
+### 一般均衡理論（v0.8.0で追加）
+
+- `NGoodCobbDouglasUtility`: N 財コブ＝ダグラス効用 `U(x) = Π x_k^{α_k}`。既存の2財専用
+  `BaseUtilityFunction` は継承せず、`typing.Protocol` による `UtilityProtocol`
+  （`utility_variables` / `get_expression` / `evaluate` / `get_demand`）を満たします。
+  指数は `sp.Rational` に変換され、記号計算で Float 係数が残りません。
+- `BaseConsumer`: 効用関数と初期保有を統合し、需要・限界代替率（記号式・数値）を算出します。
+- `ArrowDebreuEconomy`: M 消費者・N 財の純粋交換経済。基準財の価格を 1.0 に固定し、
+  非基準財を対数価格 `p_k = exp(θ_k)` でパラメータ化して正値性を保証した上で、
+  ワルラス法則により N-1 本の超過需要方程式を `scipy.optimize.root(method='hybr')`
+  で解きます。市場清算誤差（超過需要の L2 ノルム）が `1e-6` を超える場合や、
+  内点解の財で限界代替率と価格比が一致しない場合は `RuntimeError` を送出します。
+- `EdgeworthBox`: 2消費者・2財モデル。`MRS_A = MRS_B` から契約曲線 `x2A = f(x1A)` を
+  SymPy で導出し（`EdgeworthBox.x1A` で同一シンボルを参照可能）、競争均衡と合わせて
+  `EdgeworthBoxResult` として返します。
+
+結果は `CompetitiveEquilibriumResult`（価格・配分・効用・市場清算誤差）として返り、
+配分・効用のマッピングは `MappingProxyType` により読み取り専用です。
+
 ## v0.7.0 スコープ
 
 **一般形ゲーム解法・動的ゲーム・連続戦略ゲーム** を追加しました。外部のゲーム理論
@@ -338,6 +363,38 @@ spne = ExtensiveFormGame("root", nodes).solve_spne()
 print(dict(spne.equilibrium_strategies[1]), spne.payoffs)  # {'n_enter': 'Acquiesce'} (100.0, 100.0)
 ```
 
+### 一般均衡理論（Edgeworth Box・Arrow-Debreu）
+
+```python
+from microecon.general_equilibrium import (
+    ArrowDebreuEconomy,
+    BaseConsumer,
+    EdgeworthBox,
+    NGoodCobbDouglasUtility,
+)
+
+# 2財2消費者の Edgeworth Box
+consumer_a = BaseConsumer("A", NGoodCobbDouglasUtility((0.6, 0.4)), (8.0, 2.0))
+consumer_b = BaseConsumer("B", NGoodCobbDouglasUtility((0.2, 0.8)), (2.0, 8.0))
+box = EdgeworthBox(consumer_a, consumer_b)
+result = box.analyze(numeraire_idx=0)
+print(result.contract_curve_expression)  # -2*x1A/(x1A - 12)
+print(result.competitive_equilibrium.prices)  # ≈(1.0, 1.7143)
+print(dict(result.competitive_equilibrium.allocations))  # A ≈ (6.857, 2.667), B ≈ (3.143, 7.333)
+
+# 3財の Arrow-Debreu 経済
+utility = NGoodCobbDouglasUtility((0.5, 0.3, 0.2))
+economy = ArrowDebreuEconomy(
+    (
+        BaseConsumer("A", utility, (10.0, 5.0, 0.0)),
+        BaseConsumer("B", utility, (0.0, 5.0, 10.0)),
+    )
+)
+equilibrium = economy.solve(numeraire_idx=0)
+print(equilibrium.prices)  # ≈(1.0, 0.6, 0.4)
+print(equilibrium.market_clearing_error < 1e-6)  # True
+```
+
 ## 開発
 
 ```bash
@@ -351,6 +408,36 @@ poetry run pytest
 
 A type-safe, intuitive Python library for computing and visualizing the
 foundational theory of microeconomics, aimed at both education and practical use.
+
+### v0.8.0 Scope
+
+Adds **general equilibrium theory (pure exchange economies, the Edgeworth box,
+and Arrow-Debreu competitive equilibrium)** as `microecon.general_equilibrium`,
+implemented with pure Python + NumPy / SciPy + SymPy only.
+
+#### General Equilibrium (new in v0.8.0)
+
+- `NGoodCobbDouglasUtility`: N-good Cobb-Douglas utility `U(x) = Π x_k^{α_k}`.
+  Rather than inheriting the two-good `BaseUtilityFunction`, it satisfies the
+  `typing.Protocol`-based `UtilityProtocol` (`utility_variables` /
+  `get_expression` / `evaluate` / `get_demand`). Exponents are converted to
+  `sp.Rational`, so no Float coefficients remain in symbolic results.
+- `BaseConsumer`: combines a utility function with an endowment and computes
+  demand and the marginal rate of substitution (symbolic and numeric).
+- `ArrowDebreuEconomy`: M-consumer, N-good pure exchange economy. The numeraire
+  price is fixed at 1.0 and the other prices are parameterized as
+  `p_k = exp(θ_k)` to guarantee positivity; by Walras' law, the N-1 excess
+  demand equations are solved with `scipy.optimize.root(method='hybr')`.
+  Raises `RuntimeError` if the market-clearing error (L2 norm of excess demand)
+  exceeds `1e-6` or if MRS and price ratios disagree for interior goods.
+- `EdgeworthBox`: two-consumer, two-good model. Derives the contract curve
+  `x2A = f(x1A)` from `MRS_A = MRS_B` with SymPy (the shared symbol is exposed
+  as `EdgeworthBox.x1A`) and returns it with the competitive equilibrium as an
+  `EdgeworthBoxResult`.
+
+Results are returned as `CompetitiveEquilibriumResult` (prices, allocations,
+utilities, market-clearing error); the allocation and utility mappings are
+read-only via `MappingProxyType`.
 
 ### v0.7.0 Scope
 
@@ -716,6 +803,38 @@ nodes = {
 }
 spne = ExtensiveFormGame("root", nodes).solve_spne()
 print(dict(spne.equilibrium_strategies[1]), spne.payoffs)  # {'n_enter': 'Acquiesce'} (100.0, 100.0)
+```
+
+#### General Equilibrium (Edgeworth Box & Arrow-Debreu)
+
+```python
+from microecon.general_equilibrium import (
+    ArrowDebreuEconomy,
+    BaseConsumer,
+    EdgeworthBox,
+    NGoodCobbDouglasUtility,
+)
+
+# Two-good, two-consumer Edgeworth box
+consumer_a = BaseConsumer("A", NGoodCobbDouglasUtility((0.6, 0.4)), (8.0, 2.0))
+consumer_b = BaseConsumer("B", NGoodCobbDouglasUtility((0.2, 0.8)), (2.0, 8.0))
+box = EdgeworthBox(consumer_a, consumer_b)
+result = box.analyze(numeraire_idx=0)
+print(result.contract_curve_expression)  # -2*x1A/(x1A - 12)
+print(result.competitive_equilibrium.prices)  # ≈(1.0, 1.7143)
+print(dict(result.competitive_equilibrium.allocations))  # A ≈ (6.857, 2.667), B ≈ (3.143, 7.333)
+
+# Three-good Arrow-Debreu economy
+utility = NGoodCobbDouglasUtility((0.5, 0.3, 0.2))
+economy = ArrowDebreuEconomy(
+    (
+        BaseConsumer("A", utility, (10.0, 5.0, 0.0)),
+        BaseConsumer("B", utility, (0.0, 5.0, 10.0)),
+    )
+)
+equilibrium = economy.solve(numeraire_idx=0)
+print(equilibrium.prices)  # ≈(1.0, 0.6, 0.4)
+print(equilibrium.market_clearing_error < 1e-6)  # True
 ```
 
 ### Development
