@@ -2,6 +2,50 @@
 
 ミクロ経済学の基礎理論を、型安全かつ直感的に計算・可視化できる教育・実務向け Python ライブラリです。
 
+## v0.9.0 スコープ
+
+**産業組織論（独占・価格差別・寡占・市場構造比較）** を `microecon.industrial_organization`
+として追加しました。学部中級ミクロ経済学の副教材として、計算結果に加えて導出過程の解説
+（`markdown_steps`）と市場構造の比較を提供します。
+
+### 産業組織論（v0.9.0で追加）
+
+**できること**
+
+| 区分 | クラス・関数 | 内容 |
+|---|---|---|
+| 独占 | `Monopoly` | 単一価格独占（MR = MC）・第1種（完全）価格差別。CS・PS・利潤・DWL・ラーナー指数 |
+| 独占 | `ThirdDegreePriceDiscrimination` | 第3種価格差別（費用は総生産量の関数で市場間は非分離。ヘッセ行列で SOC を確認） |
+| 寡占 | `CournotDuopoly` | クールノー複占（`ContinuousGame` へ委譲） |
+| 寡占 | `StackelbergDuopoly` | シュタッケルベルク複占（追従者の非負制約付き反応関数を区分的に扱う後方帰納法） |
+| 寡占 | `DifferentiatedBertrand` / `HomogeneousBertrand` | 差別化財ベルトラン（`ContinuousGame` へ委譲）・同質財ベルトラン（解析解） |
+| 比較 | `compare_market_structures` | 完全競争・ベルトラン・シュタッケルベルク・クールノー・独占の比較表（`to_markdown_table()`） |
+| 図 | `IOPlotter` | 独占の余剰の塗り分け図、反応曲線（`Figure` を返す） |
+
+- 社会厚生は W = CS + PS、死荷重は DWL = W_c − W（非負）で全モデル共通です。
+- 生産者余剰と利潤を区別します（PS = 収入 − 可変費用、利潤 = 収入 − 総費用）。
+- 均衡が存在しない・一意に選べない場合は `NoEquilibriumError`、不正な入力は
+  `InvalidEconomicParameterError` を送出します。
+
+**対象外**
+
+- 第2種価格差別（非線形価格・数量割引）
+- 3社以上の寡占、生産能力制約付きベルトラン（エッジワース）、ホテリング型立地競争
+- 自然独占（競争均衡点で限界費用が逓減するケース。`NoEquilibriumError`）
+- 第3種価格差別で一部の市場が閉鎖される角解（`NoEquilibriumError`）
+- 限界費用が一定でない場合の寡占の死荷重
+- 非線形（非アフィン）需要体系における差別化財ベルトランの消費者余剰
+
+**消費者余剰・死荷重を `None` とするケース**
+
+- 差別化財ベルトランの消費者余剰は、需要体系が価格のアフィン関数でヤコビ行列が対称かつ
+  負定値の場合に限り、逆需要から構成した代表的消費者の二次効用 U(q) により
+  CS = U(q*) − p*·q* と定義します。条件を満たさない場合は `consumer_surplus`・
+  `social_welfare`・`deadweight_loss` を `None` とし、理由を `welfare_note` に記載します。
+- クールノー・シュタッケルベルク・差別化財ベルトランで限界費用が一定でない場合は、
+  競争ベンチマークが不動点問題になるため `deadweight_loss` のみ `None` とします
+  （CS と W は計算します）。
+
 ## v0.8.0 スコープ
 
 **一般均衡理論（純粋交換経済・Edgeworth Box・Arrow-Debreu競争均衡）** を
@@ -395,6 +439,33 @@ print(equilibrium.prices)  # ≈(1.0, 0.6, 0.4)
 print(equilibrium.market_clearing_error < 1e-6)  # True
 ```
 
+### 産業組織論
+
+```python
+import sympy as sp
+
+from microecon.industrial_organization import (
+    Monopoly,
+    StackelbergDuopoly,
+    compare_market_structures,
+)
+
+# 単一価格独占（P = 100 - Q、C = 20Q）
+Q = sp.Symbol("Q")
+monopoly = Monopoly(100 - Q, Q, 20 * Q).solve_single_price()
+print(monopoly.quantity, monopoly.price)  # 40.0 60.0
+print(monopoly.deadweight_loss, monopoly.lerner_index)  # 800.0 0.666...
+print(monopoly.markdown_steps)  # MR の導出からラーナー指数までの解説
+
+# シュタッケルベルク複占（企業1が先導者）
+q1, q2 = sp.symbols("q1 q2")
+stackelberg = StackelbergDuopoly(100 - (q1 + q2), (q1, q2), (10 * q1, 10 * q2)).solve()
+print(stackelberg.quantities, stackelberg.profits)  # (45.0, 22.5) (1012.5, 506.25)
+
+# 市場構造の比較表
+print(compare_market_structures(100 - Q, Q, marginal_cost=10.0).to_markdown_table())
+```
+
 ## 開発
 
 ```bash
@@ -408,6 +479,56 @@ poetry run pytest
 
 A type-safe, intuitive Python library for computing and visualizing the
 foundational theory of microeconomics, aimed at both education and practical use.
+
+### v0.9.0 Scope
+
+Adds **industrial organization (monopoly, price discrimination, oligopoly, and
+market-structure comparison)** as `microecon.industrial_organization`. Aimed at
+intermediate undergraduate microeconomics, it provides step-by-step derivations
+(`markdown_steps`) and market-structure comparisons in addition to the numbers.
+
+#### Industrial Organization (new in v0.9.0)
+
+**What it does**
+
+| Area | Class / function | Description |
+|---|---|---|
+| Monopoly | `Monopoly` | Single-price monopoly (MR = MC) and first-degree (perfect) price discrimination: CS, PS, profit, DWL, Lerner index |
+| Monopoly | `ThirdDegreePriceDiscrimination` | Third-degree price discrimination (cost depends on total output, so markets are linked; SOC via the Hessian) |
+| Oligopoly | `CournotDuopoly` | Cournot duopoly (delegates to `ContinuousGame`) |
+| Oligopoly | `StackelbergDuopoly` | Stackelberg duopoly (backward induction with the follower's piecewise, non-negative reaction function) |
+| Oligopoly | `DifferentiatedBertrand` / `HomogeneousBertrand` | Differentiated-goods Bertrand (delegates to `ContinuousGame`) and homogeneous-goods Bertrand (closed form) |
+| Comparison | `compare_market_structures` | Perfect competition, Bertrand, Stackelberg, Cournot and monopoly side by side (`to_markdown_table()`) |
+| Plots | `IOPlotter` | Monopoly surplus areas and reaction curves (returns a `Figure`) |
+
+- Social welfare is W = CS + PS and deadweight loss is DWL = W_c − W (non-negative)
+  in every model.
+- Producer surplus and profit are distinguished (PS = revenue − variable cost,
+  profit = revenue − total cost).
+- Raises `NoEquilibriumError` when no equilibrium exists or none can be selected
+  uniquely, and `InvalidEconomicParameterError` for invalid inputs.
+
+**Out of scope**
+
+- Second-degree price discrimination (nonlinear pricing, quantity discounts)
+- Oligopolies with three or more firms, capacity-constrained (Edgeworth)
+  Bertrand, Hotelling location competition
+- Natural monopoly (marginal cost decreasing at the competitive equilibrium;
+  `NoEquilibriumError`)
+- Third-degree corner solutions where a market is closed (`NoEquilibriumError`)
+- Oligopoly deadweight loss when marginal cost is not constant
+- Consumer surplus of differentiated Bertrand with nonlinear (non-affine) demand
+
+**When consumer surplus or deadweight loss is `None`**
+
+- For differentiated Bertrand, consumer surplus is defined only when demand is
+  affine in prices with a symmetric, negative-definite Jacobian: a quadratic
+  utility U(q) of a representative consumer is built from inverse demand and
+  CS = U(q*) − p*·q*. Otherwise `consumer_surplus`, `social_welfare` and
+  `deadweight_loss` are `None`, with the reason in `welfare_note`.
+- For Cournot, Stackelberg and differentiated Bertrand with non-constant
+  marginal cost, the competitive benchmark becomes a fixed-point problem, so
+  only `deadweight_loss` is `None` (CS and W are still computed).
 
 ### v0.8.0 Scope
 
@@ -835,6 +956,33 @@ economy = ArrowDebreuEconomy(
 equilibrium = economy.solve(numeraire_idx=0)
 print(equilibrium.prices)  # ≈(1.0, 0.6, 0.4)
 print(equilibrium.market_clearing_error < 1e-6)  # True
+```
+
+#### Industrial Organization
+
+```python
+import sympy as sp
+
+from microecon.industrial_organization import (
+    Monopoly,
+    StackelbergDuopoly,
+    compare_market_structures,
+)
+
+# Single-price monopoly (P = 100 - Q, C = 20Q)
+Q = sp.Symbol("Q")
+monopoly = Monopoly(100 - Q, Q, 20 * Q).solve_single_price()
+print(monopoly.quantity, monopoly.price)  # 40.0 60.0
+print(monopoly.deadweight_loss, monopoly.lerner_index)  # 800.0 0.666...
+print(monopoly.markdown_steps)  # derivation from MR to the Lerner index
+
+# Stackelberg duopoly (firm 1 leads)
+q1, q2 = sp.symbols("q1 q2")
+stackelberg = StackelbergDuopoly(100 - (q1 + q2), (q1, q2), (10 * q1, 10 * q2)).solve()
+print(stackelberg.quantities, stackelberg.profits)  # (45.0, 22.5) (1012.5, 506.25)
+
+# Market-structure comparison table
+print(compare_market_structures(100 - Q, Q, marginal_cost=10.0).to_markdown_table())
 ```
 
 ### Development
